@@ -16,9 +16,9 @@
 
     <div id="cesiumContainer"></div>
 
-    <!-- 加入 crossorigin="anonymous" 是為了避免 Canvas 跨域污染導致無法渲染 -->
+    <!-- 增加 cache-control 的參數，強迫瀏覽器每次都拿最新的影像 -->
     <img id="mjpeg-stream" src="https://tcnvr8.taichung.gov.tw/d9216d9c" crossorigin="anonymous" style="display:none;">
-    <canvas id="video-canvas" width="640" height="480" style="display:none;"></canvas>
+    <canvas id="video-canvas" width="480" height="640" style="display:none;"></canvas>
 
     <script>
         const viewer = new Cesium.Viewer('cesiumContainer', {
@@ -45,25 +45,35 @@
         const canvas = document.getElementById('video-canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
+        // 持續更新 Canvas 的渲染循環
         function renderFrame() {
-            if (img.complete && img.naturalHeight !== 0) {
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // 每次重新畫圖前，清空 Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.save();
+            // 旋轉與位移邏輯：逆時針轉 90 度
+            // 因為轉動後坐標系會改變，所以先移軸心再轉
+            ctx.translate(0, canvas.width); 
+            ctx.rotate(-90 * Math.PI / 180);
+            
+            // 繪製影像 (注意這裡的寬高比例調整)
+            if (img.complete) {
+                ctx.drawImage(img, 0, 0, 640, 480);
             }
+            ctx.restore();
+            
             requestAnimationFrame(renderFrame);
         }
         renderFrame(); 
 
-        // 建立 3D 牆面實體
         const cctvPolygon = viewer.entities.add({
             polygon: {
-                // 使用您在校正工具匯出的資料格式 [經, 緯, 高, 經, 緯, 高...]
                 hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights([
                      120.693041, 24.134783, 4.81,
                      120.693051, 24.134874, 4.81,
                      120.693051, 24.134874, 0,
                      120.693041, 24.134783, 0
                 ]),
-                // 關鍵：明確設定為 True，讓 Cesium 讀取您上面提供的 Height 值
                 perPositionHeight: true,
                 material: new Cesium.ImageMaterialProperty({
                     image: new Cesium.CallbackProperty(function() {
@@ -74,12 +84,11 @@
             }
         });
 
-        // 飛到該位置並聚焦
         viewer.flyTo(cctvPolygon, {
             offset: new Cesium.HeadingPitchRange(
                 0, 
-                Cesium.Math.toRadians(-30), // Pitch 設為 -30 比較能看到側面
-                100                         // Range 近一點才能看見效果
+                Cesium.Math.toRadians(-30),
+                100
             )
         });
     </script>
