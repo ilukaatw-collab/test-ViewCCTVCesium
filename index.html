@@ -3,40 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cesium CCTV 影像敷貼</title>
+    <title>Cesium CCTV 多邊形敷貼</title>
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.116/Build/Cesium/Cesium.js"></script>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.116/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #000; }
         #cesiumContainer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
-        .cesium-viewer-toolbar, .cesium-viewer-animationContainer, .cesium-viewer-timelineContainer, .cesium-viewer-bottom { display: none !important; }
+        .cesium-viewer-bottom { display: none !important; }
     </style>
 </head>
 <body>
 
     <div id="cesiumContainer"></div>
 
-    <!-- 這是準備用來當作材質的隱藏影片 (測試用) -->
-    <video id="testVideo" loop autoplay muted crossorigin="anonymous" style="display: none;">
-        <!-- 您可以替換成實際的 MJPEG Canvas 或 HLS 影片源 -->
-        <source src="https://tcnvr8.taichung.gov.tw/d9216d9c" type="video/mp4">
-    </video>
+    <img id="mjpeg-stream" src="https://tcnvr8.taichung.gov.tw/d9216d9c" crossorigin="anonymous" style="display:none;">
 
-    <!-- UI 面板 -->
-    <div class="absolute top-4 left-4 z-20 bg-gray-900/80 backdrop-blur-md text-white p-4 rounded-xl shadow-lg border border-gray-700">
-        <h2 class="text-sm font-bold mb-2">CCTV 影像敷貼測試</h2>
-        <p class="text-xs text-gray-400 mb-2">影片已使用 JSON 參數對位</p>
-        <button id="btnFly" class="bg-blue-600 hover:bg-blue-500 text-white text-xs py-1 px-3 rounded">
-            飛至攝影機視角
-        </button>
-    </div>
+    <canvas id="video-canvas" width="640" height="480" style="display:none;"></canvas>
 
     <script>
+        // 初始化 Cesium (使用國土測繪中心正射影像)
         const viewer = new Cesium.Viewer('cesiumContainer', {
             baseLayer: new Cesium.ImageryLayer(new Cesium.WebMapTileServiceImageryProvider({
                 url : 'https://wmts.nlsc.gov.tw/wmts',
-                layer : 'PHOTO2', 
+                layer : 'PHOTO2',
                 style : 'default',
                 format : 'image/png',
                 tileMatrixSetID : 'GoogleMapsCompatible',
@@ -49,75 +38,52 @@
             infoBox: false,
             navigationHelpButton: false,
             sceneModePicker: false,
-            animation: false,
-            timeline: false
+            animation: false, 
+            timeline: false   
         });
 
-        // 🟢 這裡替換成您剛剛匯出的 JSON 參數！
-        const camData = {
-              "lon": 120.684,
-              "lat": 24.137,
-              "height": 9,
-              "heading": 0,
-              "pitch": -15,
-              "fov": 60,
-        };
+        const img = document.getElementById('mjpeg-stream');
+        const canvas = document.getElementById('video-canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        const videoElement = document.getElementById('testVideo');
+        // 建立一個無限循環，持續將即時影像畫上 Canvas
+        function renderFrame() {
+            if (img.complete && img.naturalHeight !== 0) {
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            }
+            requestAnimationFrame(renderFrame);
+        }
+        renderFrame(); 
 
-        // 計算攝影機的位置
-        const position = Cesium.Cartesian3.fromDegrees(camData.lon, camData.lat, camData.height);
-
-        // --- 核心邏輯：在攝影機前方建立一個用來貼影片的平面 ---
-        
-        // 1. 計算攝影機前方的目標點 (投射距離，可依需求調整，例如 100 公尺)
-        const projectionDistance = 100;
-        
-        // 建立旋轉矩陣
-        const headingRad = Cesium.Math.toRadians(camData.heading);
-        const pitchRad = Cesium.Math.toRadians(camData.pitch);
-        const rollRad = 0; // 通常監視器不會歪斜
-        
-        const hpr = new Cesium.HeadingPitchRoll(headingRad, pitchRad, rollRad);
-        const orientation = Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
-
-        // 2. 建立實體 (Entity) 來乘載影片材質
-        // 我們用一個 Rectangle 或 Box 來當作投影幕
-        const projectionScreen = viewer.entities.add({
-            name: 'CCTV Projection',
-            position: position,
-            orientation: orientation,
-            // 為了簡化，這裡建立一個在攝影機前方的平面
-            plane: {
-                plane: new Cesium.Plane(Cesium.Cartesian3.UNIT_X, 0.0), // 平面法線朝向 X 軸
-                dimensions: new Cesium.Cartesian2(
-                    projectionDistance * Math.tan(Cesium.Math.toRadians(camData.fov / 2)) * 2, // 寬度 (依據 FOV 計算)
-                    projectionDistance * Math.tan(Cesium.Math.toRadians(camData.fov / 2)) * 1.5 // 高度 (概略比例)
-                ),
-                // 將影片元素直接指定為材質！
+        // 建立多邊形並貼上影片
+        const cctvPolygon = viewer.entities.add({
+            polygon: {
+                // 將範圍縮小，大約對齊台中火車站前的建國路與臺灣大道路口
+                hierarchy: Cesium.Cartesian3.fromDegreesArray([
+                    120.6835, 24.1375, 
+                    120.6845, 24.1375,
+                    120.6845, 24.1365,
+                    120.6835, 24.1365
+                ]),
+                // 使用 CallbackProperty 強制 Cesium 每一幀都抓最新的 Canvas 畫面
                 material: new Cesium.ImageMaterialProperty({
-                    image: videoElement,
-                    transparent: true,
-                    color: new Cesium.Color(1.0, 1.0, 1.0, 0.8) // 稍微透明以便看見地圖
+                    image: new Cesium.CallbackProperty(function() {
+                        return canvas;
+                    }, false),
+                    transparent: false
                 })
             }
         });
 
-        // 飛至該視角的按鈕
-        document.getElementById('btnFly').addEventListener('click', () => {
-             viewer.camera.flyTo({
-                destination: position,
-                orientation: {
-                    heading: headingRad,
-                    pitch: pitchRad,
-                    roll: rollRad
-                },
-                duration: 2.0
-            });
+        // 關鍵 3：讓視角自動「飛到」並聚焦在這個多邊形上方
+        // 這裡設定從上方往斜下看 (Pitch: -60度)，距離 400 公尺
+        viewer.flyTo(cctvPolygon, {
+            offset: new Cesium.HeadingPitchRange(
+                Cesium.Math.toRadians(0),   // Heading
+                Cesium.Math.toRadians(-60), // Pitch
+                400                         // Range (高度/距離)
+            )
         });
-
-        // 初始載入時先飛過去
-        document.getElementById('btnFly').click();
 
     </script>
 </body>
