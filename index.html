@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cesium CCTV 多邊形敷貼</title>
+    <title>Cesium CCTV 多邊形敷貼 (修正版)</title>
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.116/Build/Cesium/Cesium.js"></script>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.116/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <style>
@@ -16,12 +16,11 @@
 
     <div id="cesiumContainer"></div>
 
+    <!-- 加入 crossorigin="anonymous" 是為了避免 Canvas 跨域污染導致無法渲染 -->
     <img id="mjpeg-stream" src="https://tcnvr8.taichung.gov.tw/d9216d9c" crossorigin="anonymous" style="display:none;">
-
     <canvas id="video-canvas" width="640" height="480" style="display:none;"></canvas>
 
     <script>
-        // 初始化 Cesium (使用國土測繪中心正射影像)
         const viewer = new Cesium.Viewer('cesiumContainer', {
             baseLayer: new Cesium.ImageryLayer(new Cesium.WebMapTileServiceImageryProvider({
                 url : 'https://wmts.nlsc.gov.tw/wmts',
@@ -46,7 +45,6 @@
         const canvas = document.getElementById('video-canvas');
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        // 建立一個無限循環，持續將即時影像畫上 Canvas
         function renderFrame() {
             if (img.complete && img.naturalHeight !== 0) {
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -55,17 +53,18 @@
         }
         renderFrame(); 
 
-        // 建立多邊形並貼上影片
+        // 建立 3D 牆面實體
         const cctvPolygon = viewer.entities.add({
             polygon: {
-                // 將範圍縮小，大約對齊台中火車站前的建國路與臺灣大道路口
-                hierarchy: Cesium.Cartesian3.fromDegreesArray([
-                     120.693041,        24.134783,        4.81,
-                     120.693051,        24.134874,        4.81,
-                     120.693051,        24.134874,        0,
-                     120.693041,        24.134783,        0
+                // 使用您在校正工具匯出的資料格式 [經, 緯, 高, 經, 緯, 高...]
+                hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights([
+                     120.693041, 24.134783, 4.81,
+                     120.693051, 24.134874, 4.81,
+                     120.693051, 24.134874, 0,
+                     120.693041, 24.134783, 0
                 ]),
-                // 使用 CallbackProperty 強制 Cesium 每一幀都抓最新的 Canvas 畫面
+                // 關鍵：明確設定為 True，讓 Cesium 讀取您上面提供的 Height 值
+                perPositionHeight: true,
                 material: new Cesium.ImageMaterialProperty({
                     image: new Cesium.CallbackProperty(function() {
                         return canvas;
@@ -75,16 +74,14 @@
             }
         });
 
-        // 關鍵 3：讓視角自動「飛到」並聚焦在這個多邊形上方
-        // 這裡設定從上方往斜下看 (Pitch: -60度)，距離 400 公尺
+        // 飛到該位置並聚焦
         viewer.flyTo(cctvPolygon, {
             offset: new Cesium.HeadingPitchRange(
-                Cesium.Math.toRadians(0),   // Heading
-                Cesium.Math.toRadians(-60), // Pitch
-                400                         // Range (高度/距離)
+                0, 
+                Cesium.Math.toRadians(-30), // Pitch 設為 -30 比較能看到側面
+                100                         // Range 近一點才能看見效果
             )
         });
-
     </script>
 </body>
 </html>
